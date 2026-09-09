@@ -389,7 +389,8 @@ dialog::backdrop{background:rgba(10,20,18,.45)}
   <input type="text" id="wName" placeholder="tên hoặc biệt danh" style="width:100%" autocomplete="off">
   <label style="display:block;font-size:13px;font-weight:600;margin:14px 0 6px">Band mục tiêu</label>
   <select id="wTarget" style="width:100%"></select>
-  <div class="row" style="margin-top:18px;justify-content:flex-end">
+  <div class="row" style="margin-top:18px;justify-content:space-between">
+    <button class="btn ghost sm" id="wLogin" hidden>Đã có tài khoản? Đăng nhập</button>
     <button class="btn primary" id="wStart">Vào học</button>
   </div>
 </dialog>
@@ -618,6 +619,11 @@ function welcome() {
   const d = $("#dlgWelcome"); if (!d) return;
   const sel = $("#wTarget"); sel.innerHTML = "";
   [5, 5.5, 6, 6.5, 7, 7.5, 8].forEach(b => sel.appendChild(el('<option value="' + b + '"' + (b === 7 ? " selected" : "") + ">Band " + fmtBand(b) + "</option>")));
+  const lg = $("#wLogin");
+  if (lg && typeof SB_ON !== "undefined" && SB_ON) {
+    lg.hidden = false;
+    lg.addEventListener("click", () => { d.close(); accountDialog(); });
+  }
   d.showModal();
   $("#wStart").addEventListener("click", () => {
     ST.name = ($("#wName").value || "").trim().slice(0, 24);
@@ -680,8 +686,10 @@ ROUTES.home = function (v) {
 
   /* việc hôm nay */
   const tasks = [];
+  const allow = newAllowance();
   if (due > 0) tasks.push({ r: "vocab", t: "Ôn " + due + " thẻ từ vựng đến hạn", d: "Khoảng " + Math.max(2, Math.round(due * 0.2)) + " phút · lặp lại ngắt quãng", go: () => go("vocab", { start: true }) });
-  else tasks.push({ r: "vocab", t: "Học " + Math.min(20, newAllowance()) + " từ mới hôm nay", d: "Khoảng 8 phút · chọn pack theo chủ đề hay ra thi", go: () => go("vocab") });
+  else if (allow > 0) tasks.push({ r: "vocab", t: "Học " + Math.min(20, allow) + " từ mới hôm nay", d: "Khoảng 8 phút · chọn pack theo chủ đề hay ra thi", go: () => go("vocab") });
+  else tasks.push({ r: "vocab", t: "Đã nạp đủ 20 từ mới hôm nay", d: "Nạp thêm nữa là nhớ kém đi — mai thẻ đến hạn sẽ tự hiện lại", go: () => go("vocab") });
   const nextR = R.passages.find(p => !ST.reading[p.id]) || R.passages.slice().sort((a, c) => (ST.reading[a.id].best || 0) - (ST.reading[c.id].best || 0))[0];
   tasks.push({ r: "reading", t: (ST.reading[nextR.id] ? "Làm lại: " : "Bài đọc mới: ") + nextR.title, d: "20 phút · " + nextR.questions.length + " câu · band " + nextR.level, go: () => go("reading", nextR.id) });
   const nextL = L.sections.find(p => !ST.listening[p.id]) || L.sections[0];
@@ -730,7 +738,7 @@ ROUTES.vocab = function (v, arg) {
   const bar = el('<div class="card" style="margin-bottom:16px"><div class="row" style="justify-content:space-between"></div></div>');
   const rw = $(".row", bar);
   rw.appendChild(el('<div><div class="eyebrow">Hôm nay</div><div style="font-size:15px;margin-top:2px"><b class="mono" style="font-size:22px">' + due + '</b> thẻ đến hạn · <b class="mono">' + learnedCount() + '</b>/200 đã thuộc · còn <b class="mono">' + newAllowance() + '</b> từ mới</div></div>'));
-  const goBtn = el('<button class="btn primary">' + (due ? "Ôn " + due + " thẻ đến hạn" : "Học từ mới") + "</button>");
+  const goBtn = el('<button class="btn primary">' + (due ? "Ôn " + due + " thẻ đến hạn" : newAllowance() > 0 ? "Học từ mới" : "Ôn lại thẻ đã học") + "</button>");
   goBtn.addEventListener("click", () => vocabSession($("#view"), null));
   rw.appendChild(goBtn);
   v.appendChild(bar);
