@@ -306,6 +306,30 @@ dialog::backdrop{background:rgba(10,20,18,.45)}
 .grouphead{display:flex;align-items:baseline;gap:10px;margin:18px 0 8px}
 .grouphead b{font-family:Newsreader,serif;font-size:17px}
 @media (max-width:700px){ .maps{grid-template-columns:1fr} }
+
+/* ---------- chép chính tả ---------- */
+.dbar{height:6px;border-radius:99px;background:var(--sunk);margin-top:10px;overflow:hidden}
+.dbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .45s cubic-bezier(.22,1,.36,1)}
+.dline{font-family:Newsreader,Georgia,serif;font-size:19px;line-height:1.75;margin-top:8px}
+.d-ok{color:var(--ink)}
+.d-miss{color:var(--bad);background:var(--bad-soft);border-radius:4px;padding:0 .16em;font-weight:600}
+.d-extra{color:var(--ink-3);text-decoration:line-through;text-decoration-thickness:1px}
+.chip-on{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+button.chip{cursor:pointer}
+button.chip:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ---------- pháo giấy ---------- */
+.confetti{position:absolute;z-index:80;pointer-events:none;width:0;height:0}
+.confetti i{position:absolute;width:7px;height:11px;border-radius:2px;opacity:0;animation:pop-out .95s cubic-bezier(.18,.9,.3,1) forwards}
+@keyframes pop-out{0%{opacity:1;transform:translate(0,0) rotate(0)}70%{opacity:1}100%{opacity:0;transform:translate(var(--dx),var(--dy)) rotate(var(--rot))}}
+
+/* ---------- khung chờ khi AI chấm ---------- */
+.shim{border-radius:8px;background:linear-gradient(90deg,var(--surface-2) 25%,var(--sunk) 37%,var(--surface-2) 63%);background-size:400% 100%;animation:shim 1.3s ease-in-out infinite;height:13px;margin:9px 0}
+@keyframes shim{0%{background-position:100% 0}100%{background-position:0 0}}
+
+/* ---------- biểu đồ tiến bộ ---------- */
+.trend{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;margin-bottom:14px}
+.trend .empty-note{font-size:13px;color:var(--ink-3);margin:8px 0 0}
 /* ---------- hiệu ứng ---------- */
 .view-enter{animation:viewIn .28s cubic-bezier(.22,1,.36,1)}
 @keyframes viewIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -441,6 +465,7 @@ const blank = () => ({
   speaking: {},     // id -> {notes, bands, overall, at}
   marks: {},        // sourceId -> [{li, a, b, c, at}]
   book: {},         // word -> {ipa, vi, src, at}
+  hist: [],         // [{t, d, k, id, b}] lịch sử band từng lần làm
   days: {},         // dayKey -> {cards, acts}
   savedAt: 0,
   newToday: { d: "", n: 0 }
@@ -699,6 +724,8 @@ ROUTES.home = function (v) {
   const doneW = Object.keys(ST.writing).length;
   tasks.push({ r: "writing", t: doneW ? "Viết bài Task 2 tiếp theo" : "Viết bài Task 2 đầu tiên, có AI chấm", d: "40 phút · chấm theo 4 tiêu chí + sửa câu cụ thể", go: () => go("writing") });
   tasks.push({ r: "speaking", t: "Nói 1 cue card Part 2", d: "1 phút chuẩn bị + 2 phút nói · nói to thành tiếng", go: () => go("speaking") });
+  const dictSec = L.sections[Math.floor(Math.random() * L.sections.length)];
+  tasks.push({ r: "listening", t: "Chép chính tả 1 phần nghe", d: "Bài tập nặng nhất nhưng lên tai nhanh nhất", go: () => go("dictation", dictSec.id) });
   const bookN = Object.keys(ST.book).length;
   if (bookN) tasks.push({ r: "book", t: "Ôn " + bookN + " từ trong sổ tay", d: "Những từ chính anh đã vấp — ưu tiên hơn từ mới", go: () => go("book") });
 
@@ -709,6 +736,14 @@ ROUTES.home = function (v) {
     btn.addEventListener("click", t.go); tl.appendChild(btn);
   });
   v.appendChild(box);
+
+  /* biểu đồ tiến bộ */
+  const chart = progressChart();
+  const nHist = (ST.hist || []).length;
+  const trend = el('<div class="trend"><div class="row" style="justify-content:space-between;align-items:baseline"><span class="eyebrow">Band theo thời gian</span><span class="muted" style="font-size:12px">' + (nHist ? nHist + " lần chấm" : "chưa có dữ liệu") + '</span></div></div>');
+  if (chart) trend.appendChild(el("<div style=\"margin-top:10px\">" + chart + "</div>"));
+  else trend.appendChild(el('<p class="empty-note">Làm xong 2 bài bất kỳ là đường tiến bộ hiện ra ở đây. Nó vẽ theo từng lần chấm, không phải điểm cao nhất — nhìn được cả những hôm tụt.</p>'));
+  v.appendChild(trend);
 
   /* nhắc đăng nhập */
   if (SB_ON && !AUTH) {
@@ -1161,6 +1196,97 @@ function buildQueueX(packId) {
   for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = q[i]; q[i] = q[j]; q[j] = t; }
   return q;
 }
+/* ============ hiệu ứng & lịch sử tiến bộ ============ */
+const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* đếm số chạy dần */
+function countUp(node, to, dur) {
+  if (REDUCED || !node) { if (node) node.textContent = fmtBand(to); return; }
+  const from = 0, t0 = performance.now(), d = dur || 900;
+  function step(t) {
+    const k = Math.min(1, (t - t0) / d), e = 1 - Math.pow(1 - k, 3);
+    node.textContent = fmtBand(from + (to - from) * e);
+    if (k < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+/* pháo giấy khi phá kỷ lục */
+function confetti(anchor) {
+  if (REDUCED) return;
+  const host = document.createElement("div");
+  host.className = "confetti";
+  const r = anchor ? anchor.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight / 3, width: 0, height: 0 };
+  host.style.left = (r.left + r.width / 2) + "px";
+  host.style.top = (r.top + r.height / 2 + scrollY) + "px";
+  const cols = ["var(--hl)", "var(--accent)", "var(--ok)", "var(--s2)", "var(--s5)"];
+  for (let i = 0; i < 26; i++) {
+    const s = document.createElement("i");
+    const ang = (Math.PI * 2 * i) / 26 + Math.random() * 0.4;
+    const dist = 60 + Math.random() * 90;
+    s.style.background = cols[i % cols.length];
+    s.style.setProperty("--dx", Math.cos(ang) * dist + "px");
+    s.style.setProperty("--dy", (Math.sin(ang) * dist - 30) + "px");
+    s.style.setProperty("--rot", (Math.random() * 720 - 360) + "deg");
+    s.style.animationDelay = (Math.random() * 90) + "ms";
+    host.appendChild(s);
+  }
+  document.body.appendChild(host);
+  setTimeout(() => host.remove(), 1400);
+}
+
+/* cuộn tới câu sai đầu tiên */
+function scrollToFirstWrong(root) {
+  const bad = $(".why.bad", root);
+  const q = bad && bad.closest ? bad.closest(".q") : null;
+  if (!q) return;
+  setTimeout(() => {
+    if (!q.isConnected) return;
+    try { q.scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "center" }); } catch (e) { }
+  }, 420);
+}
+
+/* ---------- lịch sử band ---------- */
+function logBand(kind, id, band) {
+  ST.hist = ST.hist || [];
+  ST.hist.push({ t: Date.now(), d: dayKey(), k: kind, id: id, b: band });
+  if (ST.hist.length > 300) ST.hist = ST.hist.slice(-300);
+  save();
+}
+const SKILL_META = { L: ["Listening", "var(--s1)"], R: ["Reading", "var(--s3)"], W: ["Writing", "var(--s2)"], S: ["Speaking", "var(--s7)"] };
+
+function progressChart() {
+  const h = (ST.hist || []).slice().sort((a, b) => a.t - b.t);
+  if (h.length < 2) return null;
+  const W = 620, H = 190, PL = 34, PR = 92, PT = 14, PB = 26;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const lo = 4, hi = 9;
+  const t0 = h[0].t, t1 = h[h.length - 1].t, span = Math.max(1, t1 - t0);
+  const X = t => PL + (span < 6e5 ? iw : ((t - t0) / span) * iw);
+  const Y = b => PT + ih - ((Math.max(lo, Math.min(hi, b)) - lo) / (hi - lo)) * ih;
+  let g = "";
+  for (let b = lo; b <= hi; b++) {
+    g += '<line x1="' + PL + '" y1="' + Y(b).toFixed(1) + '" x2="' + (PL + iw) + '" y2="' + Y(b).toFixed(1) + '" stroke="var(--line)" stroke-width="1"/>' +
+      '<text x="' + (PL - 7) + '" y="' + (Y(b) + 4).toFixed(1) + '" text-anchor="end" font-size="10" font-family="IBM Plex Mono, monospace" fill="var(--ink-3)">' + b + "</text>";
+  }
+  const names = [];
+  Object.keys(SKILL_META).forEach(k => {
+    const pts = h.filter(x => x.k === k);
+    if (!pts.length) return;
+    const col = SKILL_META[k][1];
+    names.push(k);
+    if (pts.length > 1) {
+      g += '<path d="' + pts.map((p, i) => (i ? "L" : "M") + X(p.t).toFixed(1) + " " + Y(p.b).toFixed(1)).join(" ") +
+        '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    }
+    pts.forEach(p => { g += '<circle cx="' + X(p.t).toFixed(1) + '" cy="' + Y(p.b).toFixed(1) + '" r="4" fill="' + col + '" stroke="var(--surface)" stroke-width="2"/>'; });
+    const last = pts[pts.length - 1];
+    g += '<circle cx="' + (PL + iw + 12) + '" cy="' + (Y(last.b) - 3.5).toFixed(1) + '" r="4" fill="' + col + '"/>' +
+      '<text x="' + (PL + iw + 21) + '" y="' + Y(last.b).toFixed(1) + '" font-size="11.5" fill="var(--ink-2)">' + SKILL_META[k][0] + " " + fmtBand(last.b) + "</text>";
+  });
+  if (!names.length) return null;
+  return '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Biểu đồ band theo thời gian" style="width:100%;height:auto;overflow:visible">' + g + "</svg>";
+}
 /* ============ Reading ============ */
 ROUTES.reading = function (v, id) {
   if (id) return readingTest(v, id);
@@ -1227,9 +1353,14 @@ function readingTest(v, id) {
     const correct = qs.check();
     const band = toBand(correct, p.questions.length, RB);
     const rec = ST.reading[p.id] || { best: 0, attempts: 0 };
+    const isBest = band > (rec.best || 0);
     rec.attempts++; rec.last = band; rec.best = Math.max(rec.best || 0, band); rec.at = Date.now();
-    ST.reading[p.id] = rec; logAct("test"); save(); refreshTags();
-    right.insertBefore(el('<div class="result"><b style="color:' + bandColor(band) + '">' + fmtBand(band) + '</b><div><div style="font-weight:600">' + correct + "/" + p.questions.length + ' câu đúng</div><div class="muted" style="font-size:12.5px">Band ước lượng khi quy về thang 40 câu của đề thi thật</div></div></div>'), $("#qhost", right));
+    ST.reading[p.id] = rec; logAct("test"); logBand("R", p.id, band); save(); refreshTags();
+    const resEl = el('<div class="result"><b style="color:' + bandColor(band) + '">0.0</b><div><div style="font-weight:600">' + correct + "/" + p.questions.length + ' câu đúng</div><div class="muted" style="font-size:12.5px">' + (isBest && rec.attempts > 1 ? "Điểm cao nhất từ trước tới nay của bài này" : "Band ước lượng khi quy về thang 40 câu của đề thi thật") + '</div></div></div>');
+    right.insertBefore(resEl, $("#qhost", right));
+    countUp($("b", resEl), band);
+    if (isBest && rec.attempts > 1) confetti($("b", resEl));
+    scrollToFirstWrong(right);
     submit.remove(); cnt.remove();
     const again = el('<button class="btn">Làm lại bài này</button>');
     again.addEventListener("click", () => readingTest($("#view"), id));
@@ -1287,6 +1418,9 @@ ROUTES.listening = function (v, id) {
       const row = el('<button class="list-row"><span><span class="t">Part ' + s.part + " · " + esc(s.title) + '</span><br><span class="d">' + esc(s.titleVi) + " · 10 câu · band " + esc(s.level) + (s.board ? " · có phiếu ghi" : "") + '</span></span>' +
         '<span class="right">' + (r ? '<b class="mono" style="font-size:20px;color:' + bandColor(r.best) + '">' + fmtBand(r.best) + '</b><br><span class="d">' + r.attempts + " lần" : '<span class="pill">chưa làm</span>') + "</span></button>");
       row.addEventListener("click", () => go("listening", s.id));
+      const dic = el('<button class="btn sm ghost" title="Chép chính tả phần này" style="flex:none;margin-left:10px">✍️</button>');
+      dic.addEventListener("click", e => { e.stopPropagation(); go("dictation", s.id); });
+      row.appendChild(dic);
       list.appendChild(row);
     });
     v.appendChild(list);
@@ -1307,7 +1441,7 @@ function listeningTest(v, id) {
     '<div class="wave" id="lwave"></div>' +
     '<div class="row"><button class="btn primary" id="lplay" style="flex:1">▶ Phát bài nghe</button><button class="btn" id="lstop">■</button></div>' +
     '<p class="muted" style="font-size:12.5px;margin:10px 0 0">Nghe hết một lượt rồi mới nộp. Transcript mở ra sau khi nộp bài.</p>' +
-    '<div class="row" style="margin-top:10px"><button class="btn sm ghost" id="lopen">Mở transcript sớm</button></div></div>');
+    '<div class="row" style="margin-top:10px"><button class="btn sm" id="ldict">✍️ Chép chính tả</button><button class="btn sm ghost" id="lopen">Mở transcript sớm</button></div></div>');
   left.appendChild(player);
   const transBox = el('<div id="ltrans" style="margin-top:14px"></div>');
   left.appendChild(transBox);
@@ -1361,9 +1495,14 @@ function listeningTest(v, id) {
     const correct = qs.check();
     const band = toBand(correct, sec.questions.length, LB);
     const rec = ST.listening[sec.id] || { best: 0, attempts: 0 };
+    const isBest = band > (rec.best || 0);
     rec.attempts++; rec.last = band; rec.best = Math.max(rec.best || 0, band); rec.at = Date.now();
-    ST.listening[sec.id] = rec; logAct("test"); save(); refreshTags();
-    right.insertBefore(el('<div class="result"><b style="color:' + bandColor(band) + '">' + fmtBand(band) + '</b><div><div style="font-weight:600">' + correct + "/10 câu đúng</div><div class=\"muted\" style=\"font-size:12.5px\">Band ước lượng khi quy về thang 40 câu</div></div></div>"), $("#qhost", right));
+    ST.listening[sec.id] = rec; logAct("test"); logBand("L", sec.id, band); save(); refreshTags();
+    const resEl = el('<div class="result"><b style="color:' + bandColor(band) + '">0.0</b><div><div style="font-weight:600">' + correct + "/" + NQ + ' câu đúng</div><div class="muted" style="font-size:12.5px">' + (isBest && rec.attempts > 1 ? "Điểm cao nhất từ trước tới nay của phần này" : "Band ước lượng khi quy về thang 40 câu") + '</div></div></div>');
+    right.insertBefore(resEl, $("#qhost", right));
+    countUp($("b", resEl), band);
+    if (isBest && rec.attempts > 1) confetti($("b", resEl));
+    scrollToFirstWrong(right);
     submit.remove(); cnt.remove();
     const again = el('<button class="btn">Làm lại</button>');
     again.addEventListener("click", () => listeningTest($("#view"), id));
@@ -1422,8 +1561,11 @@ function listeningTest(v, id) {
       else toast("Phần này không có ghi chú nghe khó");
     });
   }
-  $("#lopen", player).addEventListener("click", () => {
-    if (confirm("Mở transcript trước khi nộp sẽ làm mất tính bất ngờ của bài nghe. Vẫn mở?")) showTranscript();
+  $("#ldict", player).addEventListener("click", () => go("dictation", sec.id));
+  let armed = false;
+  $("#lopen", player).addEventListener("click", e => {
+    if (!armed) { armed = true; e.target.textContent = "Mất tính bất ngờ đấy — bấm lần nữa"; e.target.classList.add("primary"); setTimeout(() => { if (armed && !shownT) { armed = false; e.target.textContent = "Mở transcript sớm"; e.target.classList.remove("primary"); } }, 4000); return; }
+    showTranscript();
   });
 }
 
@@ -1443,6 +1585,132 @@ function noteRanges(text, notes) {
   });
   return out;
 }
+/* ============ Chép chính tả ============ */
+function tok(s) { return String(s).trim().split(/\s+/).filter(Boolean); }
+function key(w) { return w.toLowerCase().replace(/[^a-z0-9']/g, ""); }
+/* so khớp hai chuỗi từ bằng LCS để biết từ nào đúng, thiếu, thừa */
+function diffWords(said, typed) {
+  const A = tok(said), B = tok(typed);
+  const n = A.length, m = B.length;
+  const dp = [];
+  for (let i = 0; i <= n; i++) { dp.push(new Array(m + 1).fill(0)); }
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    dp[i][j] = key(A[i]) === key(B[j]) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out = []; let i = 0, j = 0, hit = 0;
+  while (i < n && j < m) {
+    if (key(A[i]) === key(B[j])) { out.push({ s: "ok", w: A[i] }); hit++; i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ s: "miss", w: A[i] }); i++; }
+    else { out.push({ s: "extra", w: B[j] }); j++; }
+  }
+  while (i < n) { out.push({ s: "miss", w: A[i++] }); }
+  while (j < m) { out.push({ s: "extra", w: B[j++] }); }
+  return { parts: out, hit: hit, total: n };
+}
+
+ROUTES.dictation = function (v, id) {
+  const sec = L.sections.find(x => x.id === id) || L.sections[0];
+  const lines = sec.script;
+  const ph = PHON[sec.id] || [];
+  let i = 0, hits = 0, total = 0, wrongWords = [];
+
+  const back = el('<button class="btn ghost sm" style="margin-bottom:12px">← Danh sách bài nghe</button>');
+  back.addEventListener("click", () => go("listening", sec.id)); v.appendChild(back);
+  v.appendChild(el(head("Chép chính tả · " + esc(sec.title),
+    'Nghe từng câu rồi gõ lại đúng từng chữ. Đây là bài tập nặng nhất nhưng lên tai nhanh nhất — chỗ anh gõ sai chính là chỗ <span class="mark">tai chưa nghe ra</span>, không phải chỗ không biết từ.')));
+
+  const wrap = el('<div style="max-width:760px"></div>');
+  const bar = el('<div class="card" style="margin-bottom:12px"><div class="row" style="justify-content:space-between"><span class="eyebrow" id="dprog"></span><span class="mono" id="dacc" style="font-size:13px"></span></div><div class="dbar"><i id="dfill"></i></div></div>');
+  wrap.appendChild(bar);
+  const card = el('<div class="card"></div>');
+  wrap.appendChild(card); v.appendChild(wrap);
+
+  function render() {
+    if (i >= lines.length) return finish();
+    const line = lines[i], pe = ph.find(x => x.i === i) || {};
+    $("#dprog", bar).textContent = "Câu " + (i + 1) + " / " + lines.length + " · " + line.sp;
+    $("#dacc", bar).textContent = total ? Math.round(hits / total * 100) + "% đúng" : "";
+    $("#dfill", bar).style.width = Math.round(i / lines.length * 100) + "%";
+    card.innerHTML = "";
+    const tools = el('<div class="row" style="gap:8px;margin-bottom:14px"></div>');
+    const b1 = el('<button class="btn">🔊 Nghe câu</button>');
+    b1.addEventListener("click", () => speak(line.text, 0.98 * (ST.rate || 1)));
+    const b2 = el('<button class="btn">🐢 Chậm 0.6×</button>');
+    b2.addEventListener("click", () => speak(line.text, 0.6));
+    tools.appendChild(b1); tools.appendChild(b2);
+    card.appendChild(tools);
+    const ta = el('<textarea rows="3" placeholder="Gõ lại câu anh vừa nghe…" spellcheck="false" style="font-family:Newsreader,Georgia,serif;font-size:17px"></textarea>');
+    card.appendChild(ta);
+    const acts = el('<div class="row" style="margin-top:12px"></div>');
+    const ck = el('<button class="btn primary">Kiểm tra</button>');
+    const sk = el('<button class="btn ghost">Chịu, xem đáp án</button>');
+    acts.appendChild(ck); acts.appendChild(sk);
+    acts.appendChild(el('<span class="hint-row" style="margin:0 0 0 auto"><span><span class="kbd">Ctrl</span>+<span class="kbd">Enter</span> kiểm tra</span></span>'));
+    card.appendChild(acts);
+    ta.focus();
+    function judge(gaveUp) {
+      const d = diffWords(line.text, gaveUp ? "" : ta.value);
+      hits += d.hit; total += d.total;
+      d.parts.forEach(p => { if (p.s === "miss" && key(p.w).length > 2) wrongWords.push(p.w); });
+      card.innerHTML = "";
+      card.appendChild(el('<div class="eyebrow">Câu gốc</div>'));
+      card.appendChild(el('<div class="dline">' + d.parts.map(p =>
+        p.s === "ok" ? '<span class="d-ok">' + esc(p.w) + "</span>" :
+          p.s === "miss" ? '<span class="d-miss">' + esc(p.w) + "</span>" :
+            '<span class="d-extra">' + esc(p.w) + "</span>").join(" ") + "</div>"));
+      if (pe.ipa) card.appendChild(el('<div class="ipa-line">' + esc(pe.ipa) + "</div>"));
+      (pe.notes || []).forEach(n => card.appendChild(el('<div class="note" style="display:inline-block;margin-top:8px;margin-right:6px"><b>' + esc(n.span) + "</b> — " + esc(n.hint) + "</div>")));
+      const sc = Math.round(d.hit / Math.max(1, d.total) * 100);
+      card.appendChild(el('<div class="row" style="margin-top:14px;justify-content:space-between"><span class="pill ' + (sc >= 90 ? "ok" : sc >= 60 ? "warn" : "bad") + '">Câu này ' + sc + '% đúng</span><span class="muted" style="font-size:12.5px">xanh = đúng · đỏ = thiếu · gạch = thừa</span></div>'));
+      const nx = el('<div class="row" style="margin-top:12px"></div>');
+      const rep = el('<button class="btn">🔊 Nghe lại</button>');
+      rep.addEventListener("click", () => speak(line.text, 0.75));
+      const go2 = el('<button class="btn primary">Câu tiếp theo</button>');
+      go2.addEventListener("click", () => { i++; render(); });
+      nx.appendChild(go2); nx.appendChild(rep);
+      card.appendChild(nx);
+      logAct("dictation");
+    }
+    ck.addEventListener("click", () => judge(false));
+    sk.addEventListener("click", () => judge(true));
+    ta.addEventListener("keydown", e => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") judge(false); });
+    setTimeout(() => speak(line.text, 0.98 * (ST.rate || 1)), 250);
+  }
+
+  function finish() {
+    const acc = total ? Math.round(hits / total * 100) : 0;
+    $("#dfill", bar).style.width = "100%";
+    $("#dprog", bar).textContent = "Xong " + lines.length + " câu";
+    card.innerHTML = "";
+    card.appendChild(el('<div style="text-align:center;padding:10px 0"><div class="eyebrow">Độ chính xác</div><div class="mono" id="dfin" style="font-size:46px;font-weight:600;line-height:1.1;color:' + (acc >= 85 ? "var(--ok)" : acc >= 60 ? "var(--warn)" : "var(--bad)") + '">0%</div></div>'));
+    const uniq = [];
+    wrongWords.forEach(w => { const k = key(w); if (k && uniq.indexOf(k) < 0) uniq.push(k); });
+    if (uniq.length) {
+      card.appendChild(el('<div class="sep"></div><div class="eyebrow">Từ anh nghe hụt (' + uniq.length + ")</div>"));
+      const ch = el('<div class="chips" style="margin-top:8px"></div>');
+      uniq.slice(0, 30).forEach(w => {
+        const d = look(w);
+        const c = el('<button class="chip" title="Thêm vào sổ từ">' + esc(w) + (d ? ' <span class="ipa-t" style="color:var(--accent)">' + esc(d[0]) + "</span>" : "") + "</button>");
+        c.addEventListener("click", () => { saveWord(w, sec.id); c.classList.add("chip-on"); c.textContent = w + " ✓"; });
+        ch.appendChild(c);
+      });
+      card.appendChild(ch);
+      const all = el('<button class="btn sm" style="margin-top:12px">Lưu tất cả vào sổ từ</button>');
+      all.addEventListener("click", () => { let n = 0; uniq.forEach(w => { if (saveWord(w, sec.id)) n++; }); toast(n ? "Đã thêm " + n + " từ" : "Đã có đủ trong sổ"); go("book"); });
+      card.appendChild(all);
+    }
+    const row = el('<div class="row" style="margin-top:16px"></div>');
+    const again = el('<button class="btn">Chép lại phần này</button>');
+    again.addEventListener("click", () => go("dictation", sec.id));
+    const nxt = el('<button class="btn primary">Làm bài nghe này</button>');
+    nxt.addEventListener("click", () => go("listening", sec.id));
+    row.appendChild(nxt); row.appendChild(again);
+    card.appendChild(row);
+    const n = $("#dfin", card);
+    if (!REDUCED) { let k = 0; const iv = setInterval(() => { k += 2; if (k >= acc) { k = acc; clearInterval(iv); } n.textContent = k + "%"; }, 16); } else n.textContent = acc + "%";
+    if (acc >= 85) confetti(n);
+  }
+  render();
+};
 /* ============ biểu đồ Task 1 ============ */
 const SER = ["var(--s1)","var(--s2)","var(--s3)","var(--s4)","var(--s5)","var(--s6)","var(--s7)","var(--s8)"];
 function wrapLab(lab, x, y) {
@@ -1666,12 +1934,13 @@ function writeEditor(v, item, task) {
     if (count() < 60) return toast("Viết ít nhất 60 từ rồi hãy chấm");
     clearInterval(tick); run = false; tBtn.textContent = "Bấm giờ";
     btnAI.disabled = true; btnAI.innerHTML = '<span class="spin"></span> Đang chấm…';
-    out.innerHTML = '<div class="card muted"><span class="spin"></span> Giám khảo AI đang đọc bài…</div>';
+    out.innerHTML = '<div class="card"><div class="row" style="gap:8px"><span class="spin"></span><b style="font-size:14px">Giám khảo AI đang đọc bài…</b></div><div class="shim" style="width:92%"></div><div class="shim" style="width:78%"></div><div class="shim" style="width:85%"></div><div class="shim" style="width:60%"></div></div>';
     const prompt = buildWritingPrompt(item, task, text);
     try {
       const r = await aiJson(prompt);
       renderFeedback(out, r, "Writing");
       const ov = Number(r.overall) || null;
+      if (ov) { logBand("W", item.id, ov); const bn = $(".mono", out); if (bn) { const target = ov; bn.textContent = "0.0"; countUp(bn, target); } }
       ST.writing[item.id] = Object.assign(rec, { text: text, overall: ov, bands: r.bands, at: Date.now() });
       logAct("write"); save(); refreshTags();
     } catch (e) { out.innerHTML = aiErrorHtml(e); }
@@ -1851,7 +2120,7 @@ function cueSession(v, card) {
     if ((text.match(/\S+/g) || []).length < 40) return toast("Gõ ít nhất 40 từ rồi hãy chấm");
     if (sr) { try { sr.stop(); } catch (e) { } }
     btnAI.disabled = true; btnAI.innerHTML = '<span class="spin"></span> Đang chấm…';
-    out.innerHTML = '<div class="card muted"><span class="spin"></span> Giám khảo AI đang nghe lại phần nói…</div>';
+    out.innerHTML = '<div class="card"><div class="row" style="gap:8px"><span class="spin"></span><b style="font-size:14px">Giám khảo AI đang nghe lại phần nói…</b></div><div class="shim" style="width:90%"></div><div class="shim" style="width:72%"></div><div class="shim" style="width:83%"></div></div>';
     const crit = S.descriptors.criteria.map(c => c.key + " (" + c.name + "): band 6 = " + c.bands["6"] + " | band 7 = " + c.bands["7"] + " | band 8 = " + c.bands["8"]).join("\n");
     const prompt = "Bạn là giám khảo IELTS Speaking. Dưới đây là bản gõ lại phần trả lời Part 2 của thí sinh (không có âm thanh, nên với tiêu chí Pronunciation hãy chấm dè dặt và nói rõ giới hạn đó trong nhận xét).\n\n" +
       "CUE CARD:\n" + card.cue + "\n" + card.bullets.map(b => "- " + b).join("\n") + "\n\n" +
@@ -1863,7 +2132,9 @@ function cueSession(v, card) {
     try {
       const r = await aiJson(prompt);
       renderFeedback(out, r, "Speaking");
-      ST.speaking[card.id] = { notes: text, overall: Number(r.overall) || null, bands: r.bands, at: Date.now() };
+      const ovS = Number(r.overall) || null;
+      if (ovS) { logBand("S", card.id, ovS); const bn = $(".mono", out); if (bn) { bn.textContent = "0.0"; countUp(bn, ovS); } }
+      ST.speaking[card.id] = { notes: text, overall: ovS, bands: r.bands, at: Date.now() };
       logAct("speak"); save(); refreshTags();
     } catch (e) { out.innerHTML = aiErrorHtml(e); }
     btnAI.disabled = false; btnAI.textContent = "Chấm lại bằng AI";
