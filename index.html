@@ -1939,6 +1939,37 @@ function mergeState(a, b) {
   }
   const an = a.newToday || { d: "", n: 0 }, bn = b.newToday || { d: "", n: 0 };
   out.newToday = an.d === bn.d ? { d: an.d, n: Math.max(an.n || 0, bn.n || 0) } : (bn.d === dayKey() ? bn : an);
+
+  /* sổ từ: gộp cả hai máy, bản nào có phiên âm/nghĩa thì giữ, giữ mốc thời gian sớm nhất */
+  out.book = {};
+  const bookKeys = Object.keys(a.book || {}).concat(Object.keys(b.book || {}));
+  bookKeys.forEach(k => {
+    if (out.book[k]) return;
+    const x = (a.book || {})[k], y = (b.book || {})[k];
+    if (!x) { out.book[k] = y; return; }
+    if (!y) { out.book[k] = x; return; }
+    out.book[k] = {
+      ipa: x.ipa || y.ipa || "",
+      vi: x.vi || y.vi || "",
+      src: x.src || y.src || "",
+      at: Math.min(x.at || Date.now(), y.at || Date.now())
+    };
+  });
+
+  /* chỗ đã tô: gộp cả hai máy, bỏ trùng theo (dòng, từ đầu, từ cuối) */
+  out.marks = {};
+  const mSrc = Object.keys(a.marks || {}).concat(Object.keys(b.marks || {}));
+  mSrc.forEach(src => {
+    if (out.marks[src]) return;
+    const list = [].concat((a.marks || {})[src] || [], (b.marks || {})[src] || []);
+    const seen = {}, keep = [];
+    list.forEach(m => {
+      const k = m.li + ":" + m.a + ":" + m.b;
+      if (seen[k]) return;
+      seen[k] = 1; keep.push(m);
+    });
+    if (keep.length) out.marks[src] = keep;
+  });
   out.savedAt = Date.now();
   return out;
 }
