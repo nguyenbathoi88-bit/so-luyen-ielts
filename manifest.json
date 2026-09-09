@@ -1,0 +1,9 @@
+{
+  "name": "Sổ Luyện IELTS",
+  "short_name": "IELTS",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#E9ECEA",
+  "theme_color": "#0B5D57",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
