@@ -2758,7 +2758,7 @@ function cmdIndex() {
   R.passages.forEach(p => out.push({ g: "Reading", t: p.title, s: p.topic + " · band " + p.level, i: "book", run: () => go("reading", p.id) }));
   L.sections.forEach(s => {
     out.push({ g: "Listening", t: "Part " + s.part + " · " + s.title, s: s.titleVi, i: "sound", run: () => go("listening", s.id) });
-    out.push({ g: "Chép chính tả", t: s.title, s: "gõ lại từng câu", i: "pen", run: () => go("dictation", s.id) });
+    out.push({ g: "Chép chính tả", t: s.title, s: "gõ lại từng câu", i: "pen", p: -14, run: () => go("dictation", s.id) });
   });
   W.task2.forEach(x => out.push({ g: "Writing T2", t: x.prompt, s: T2TYPE[x.type] + " · " + x.topic, i: "pen", run: () => go("writing", { t2: x.id }) }));
   W.task1.forEach(x => out.push({ g: "Writing T1", t: x.title, s: x.kind, i: "pen", run: () => go("writing", { t1: x.id }) }));
@@ -2766,7 +2766,7 @@ function cmdIndex() {
   V.packs.forEach(p => out.push({ g: "Chủ đề từ", t: p.nameVi, s: p.name + " · " + p.words.length + " từ", i: "book", run: () => go("vocab", { pack: p.id }) }));
   Object.keys(ST.book || {}).forEach(w => {
     const d = ST.book[w];
-    out.push({ g: "Sổ từ", t: w, s: (d && d.vi) || "", i: "book", run: () => go("book") });
+    out.push({ g: "Sổ từ", t: w, s: (d && d.vi) || "", i: "book", p: -6, run: () => go("book") });
   });
   return out;
 }
@@ -2781,7 +2781,7 @@ function cmdScore(item, q) {
   else {
     let i = 0; for (const ch of q) { i = t.indexOf(ch, i) + 1; if (!i) return 0; } sc = 12;
   }
-  return sc;
+  return Math.max(1, sc + (item.p || 0));
 }
 
 let CMD_ALL = null, cmdRows = [], cmdSel = 0;
