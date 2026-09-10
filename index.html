@@ -2757,8 +2757,8 @@ function cmdIndex() {
   const out = CMD_NAV.slice();
   R.passages.forEach(p => out.push({ g: "Reading", t: p.title, s: p.topic + " · band " + p.level, i: "book", run: () => go("reading", p.id) }));
   L.sections.forEach(s => {
-    out.push({ g: "Listening", t: "Part " + s.part + " · " + s.title, s: s.titleVi, i: "sound", run: () => go("listening", s.id) });
-    out.push({ g: "Chép chính tả", t: s.title, s: "gõ lại từng câu", i: "pen", p: -14, run: () => go("dictation", s.id) });
+    out.push({ g: "Listening", t: s.title, s: "Part " + s.part + " · " + s.titleVi, i: "sound", run: () => go("listening", s.id) });
+    out.push({ g: "Chép chính tả", t: s.title, s: "gõ lại từng câu", i: "pen", p: -26, run: () => go("dictation", s.id) });
   });
   W.task2.forEach(x => out.push({ g: "Writing T2", t: x.prompt, s: T2TYPE[x.type] + " · " + x.topic, i: "pen", run: () => go("writing", { t2: x.id }) }));
   W.task1.forEach(x => out.push({ g: "Writing T1", t: x.title, s: x.kind, i: "pen", run: () => go("writing", { t1: x.id }) }));
