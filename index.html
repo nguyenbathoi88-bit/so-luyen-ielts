@@ -461,6 +461,10 @@ button.chip:hover{border-color:var(--accent);color:var(--accent)}
 .mt-note{font-family:var(--sans);font-size:13px;color:var(--ink-3);flex:none}
 .streak{justify-content:flex-start;gap:0}
 .streak > div:last-child{margin-top:auto;padding-top:14px}
+.scopebar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;border-left:2.5px solid var(--accent);background:var(--accent-soft);padding:14px 16px;border-radius:0 var(--r-sheet) var(--r-sheet) 0;margin:20px 0 4px}
+.scopebar > div{flex:1;min-width:260px}
+.scopebar p{margin:5px 0 0;font-size:13.4px;line-height:1.6;color:var(--ink-2)}
+.scopebar .btn{flex:none}
 .nudge{display:flex;gap:14px;align-items:center;flex-wrap:wrap;border-left:2.5px solid var(--accent);background:var(--accent-soft);padding:13px 16px;border-radius:0 var(--r-sheet) var(--r-sheet) 0;margin:26px 0 0}
 
 /* ---------- bảng lệnh Ctrl+K ---------- */
@@ -796,15 +800,66 @@ const WORDS = allWords();
 const wIndex = {}; WORDS.forEach(w => wIndex[w.w] = w);
 function dueCount() { const now = Date.now(); return Object.entries(ST.srs).filter(([k, v]) => v.due <= now).length; }
 function learnedCount() { return Object.values(ST.srs).filter(v => v.ivl >= 7).length; }
+/* ---------- mục tiêu band điều khiển nội dung ---------- */
+/* Từ mới chỉ lấy trong cửa sổ quanh mục tiêu: dưới mục tiêu 1.5 band coi như đã biết,
+   trên mục tiêu 0.5 band là quá sức — học vào cũng không giữ được. */
+const BANDS_AVAIL = (function () {
+  const b = WORDS.map(w => Number(w.band)).filter(Boolean);
+  return b.length ? { min: Math.min.apply(null, b), max: Math.max.apply(null, b) } : { min: 0, max: 9 };
+})();
+function bandWindow(t) {
+  const tg = t || ST.target || 7;
+  let lo = Math.round((tg - 1.5) * 10) / 10;
+  let hi = Math.round((tg + 0.5) * 10) / 10;
+  /* kho từ chỉ có band BANDS_AVAIL.min–max: kéo cửa sổ về cho luôn có từ để học */
+  if (hi < BANDS_AVAIL.min) hi = BANDS_AVAIL.min;
+  if (lo > BANDS_AVAIL.max) lo = BANDS_AVAIL.max;
+  return { lo: lo, hi: hi, target: tg, below: tg + 0.5 < BANDS_AVAIL.min };
+}
+function inBand(w, win) {
+  const b = Number(w.band);
+  if (!b) return true;
+  const k = win || bandWindow();
+  return b >= k.lo && b <= k.hi;
+}
+function scopeCount() {
+  const win = bandWindow();
+  const inw = WORDS.filter(w => inBand(w, win));
+  return { n: inw.length, total: WORDS.length, win: win,
+    learned: inw.filter(w => ST.srs[w.w] && ST.srs[w.w].ivl >= 7).length };
+}
+/* Mục tiêu cao thì mỗi ngày nạp nhiều hơn — 8.0 cần gấp đôi vốn từ so với 5.0 */
+function dailyNew() {
+  const t = ST.target || 7;
+  return t <= 5.5 ? 15 : t <= 6.5 ? 20 : t <= 7 ? 25 : 30;
+}
 function newAllowance() {
   const k = dayKey(); if (ST.newToday.d !== k) { ST.newToday = { d: k, n: 0 }; }
-  return Math.max(0, 20 - ST.newToday.n);
+  return Math.max(0, dailyNew() - ST.newToday.n);
+}
+/* chọn bài đọc / bài nghe có dải band ôm lấy mục tiêu */
+function nearTarget(list, getLevel) {
+  const t = ST.target || 7;
+  return list.slice().sort((a, b) => {
+    const da = lvlGap(getLevel(a), t), db = lvlGap(getLevel(b), t);
+    return da - db;
+  });
+}
+function lvlGap(level, t) {
+  const m = String(level || "").match(/([\d.]+)\s*[–-]\s*([\d.]+)/);
+  if (!m) return 9;
+  const lo = parseFloat(m[1]), hi = parseFloat(m[2]);
+  if (t >= lo && t <= hi) return 0;
+  return t < lo ? lo - t : t - hi;
 }
 function buildQueue(packId) {
   const now = Date.now();
+  const win = bandWindow();
   const pool = packId ? WORDS.filter(w => w.pack === packId) : WORDS;
   const due = pool.filter(w => ST.srs[w.w] && ST.srs[w.w].due <= now);
-  const fresh = pool.filter(w => !ST.srs[w.w]).slice(0, packId ? 20 : newAllowance());
+  const fresh = pool.filter(w => !ST.srs[w.w] && inBand(w, win))
+    .sort((a, b) => (Number(a.band) || 0) - (Number(b.band) || 0))
+    .slice(0, packId ? 20 : newAllowance());
   const q = due.concat(fresh);
   for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; }
   return q;
@@ -1003,7 +1058,11 @@ $("#fileImport") && $("#fileImport").addEventListener("change", e => {
   };
   rd.readAsText(f);
 });
-$("#setTarget").addEventListener("change", e => { ST.target = parseFloat(e.target.value); save(); refreshTags(); });
+$("#setTarget").addEventListener("change", e => {
+  ST.target = parseFloat(e.target.value); save(); refreshTags();
+  const sc = scopeCount();
+  toast("Mục tiêu " + fmtBand(ST.target) + " — từ mới nay lấy trong band " + fmtBand(sc.win.lo) + "–" + fmtBand(sc.win.hi) + " (" + sc.n + " từ), " + dailyNew() + " từ/ngày");
+});
 $("#setRate").addEventListener("change", e => { ST.rate = parseFloat(e.target.value); save(); });
 $("#btnCloseSettings").addEventListener("click", () => { dlg.close(); go(CUR); });
 let resetArm = null;
@@ -1079,9 +1138,11 @@ ROUTES.home = function (v) {
   if (due > 0) tasks.push({ r: "vocab", t: "Ôn " + due + " thẻ từ vựng đến hạn", d: "Khoảng " + Math.max(2, Math.round(due * 0.2)) + " phút · lặp lại ngắt quãng", go: () => go("vocab", { start: true }) });
   else if (allow > 0) tasks.push({ r: "vocab", t: "Học " + Math.min(20, allow) + " từ mới hôm nay", d: "Khoảng 8 phút · chọn pack theo chủ đề hay ra thi", go: () => go("vocab") });
   else tasks.push({ r: "vocab", t: "Đã nạp đủ 20 từ mới hôm nay", d: "Nạp thêm nữa là nhớ kém đi — mai thẻ đến hạn sẽ tự hiện lại", go: () => go("vocab") });
-  const nextR = R.passages.find(p => !ST.reading[p.id]) || R.passages.slice().sort((a, c) => (ST.reading[a.id].best || 0) - (ST.reading[c.id].best || 0))[0];
+  const undoneR = nearTarget(R.passages.filter(p => !ST.reading[p.id]), p => p.level);
+  const nextR = undoneR[0] || R.passages.slice().sort((a, c) => (ST.reading[a.id].best || 0) - (ST.reading[c.id].best || 0))[0];
   tasks.push({ r: "reading", t: (ST.reading[nextR.id] ? "Làm lại: " : "Bài đọc mới: ") + nextR.title, d: "20 phút · " + nextR.questions.length + " câu · band " + nextR.level, go: () => go("reading", nextR.id) });
-  const nextL = L.sections.find(p => !ST.listening[p.id]) || L.sections[0];
+  const undoneL = nearTarget(L.sections.filter(p => !ST.listening[p.id]), p => p.level);
+  const nextL = undoneL[0] || L.sections[0];
   tasks.push({ r: "listening", t: (ST.listening[nextL.id] ? "Làm lại: " : "Bài nghe mới: ") + nextL.title, d: "Part " + nextL.part + " · " + nextL.questions.length + " câu · nghe 1 lần như thi thật", go: () => go("listening", nextL.id) });
   const doneW = Object.keys(ST.writing).length;
   tasks.push({ r: "writing", t: doneW ? "Viết bài Task 2 tiếp theo" : "Viết bài Task 2 đầu tiên, có AI chấm", d: "40 phút · chấm theo 4 tiêu chí + sửa câu cụ thể", go: () => go("writing") });
@@ -1129,9 +1190,13 @@ ROUTES.home = function (v) {
 };
 /* ============ Từ vựng ============ */
 function packStats(p) {
-  let learned = 0, seen = 0;
-  p.words.forEach(w => { const c = ST.srs[w.w]; if (c) { seen++; if (c.ivl >= 7) learned++; } });
-  return { learned, seen, total: p.words.length };
+  const win = bandWindow();
+  let learned = 0, seen = 0, scope = 0;
+  p.words.forEach(w => {
+    if (inBand(w, win)) scope++;
+    const c = ST.srs[w.w]; if (c) { seen++; if (c.ivl >= 7) learned++; }
+  });
+  return { learned, seen, total: p.words.length, scope: scope };
 }
 ROUTES.vocab = function (v, arg) {
   if (arg && arg.start) return vocabSession(v, null);
@@ -1140,23 +1205,38 @@ ROUTES.vocab = function (v, arg) {
   const TOTW = V.packs.reduce((a, p) => a + p.words.length, 0);
   v.appendChild(el(head("Từ vựng academic", TOTW + " từ hay ra thi, chia " + V.packs.length + " chủ đề. Thẻ hiện lại đúng lúc anh sắp quên — lặp lại ngắt quãng tiết kiệm thời gian hơn học thuộc lòng nhiều lần.")));
 
+  const SC = scopeCount();
   const bar = el(statline([
     { k: "Thẻ đến hạn", v: due, c: due ? "var(--accent)" : "var(--ink-3)" },
-    { k: "Đã thuộc", v: learnedCount(), s: "/ " + TOTW },
-    { k: "Từ mới còn lại hôm nay", v: newAllowance() }
+    { k: "Đã thuộc", v: SC.learned, s: "/ " + SC.n + " trong tầm" },
+    { k: "Từ mới còn lại hôm nay", v: newAllowance(), s: "/ " + dailyNew() }
   ]));
   const goBtn = el('<button class="btn primary">' + (due ? "Ôn " + due + " thẻ đến hạn" : newAllowance() > 0 ? "Học từ mới" : "Ôn lại thẻ đã học") + "</button>");
   goBtn.addEventListener("click", () => vocabSession($("#view"), null));
   $(".sl-act", bar).appendChild(goBtn);
   v.appendChild(bar);
-  v.appendChild(el('<div class="sect"><h3>Chủ đề</h3><span class="ln"></span><span class="mt"><b>' + V.packs.length + "</b> nhóm · <b>" + TOTW + "</b> từ</span></div>"));
+  const scopeNote = el('<div class="scopebar"></div>');
+  const expl = SC.win.below
+    ? 'Kho từ của app bắt đầu từ band ' + fmtBand(BANDS_AVAIL.min) + ' nên mục tiêu <b>' + fmtBand(ST.target) +
+      '</b> vẫn học nhóm band ' + fmtBand(BANDS_AVAIL.min) + ' — hơi cao hơn mục tiêu một chút, nhưng đó là vốn từ tối thiểu để vượt 5.5.'
+    : 'Mục tiêu <b>' + fmtBand(ST.target) + '</b> nên app bỏ qua từ dưới ' + fmtBand(SC.win.lo) +
+      ' (coi như anh đã biết) và chưa đụng tới từ trên ' + fmtBand(SC.win.hi) + ' (học vào cũng không giữ được).';
+  scopeNote.appendChild(el('<div><div class="eyebrow">Đang lấy từ mới trong band ' + fmtBand(SC.win.lo) + "–" + fmtBand(SC.win.hi) +
+    '</div><p>' + expl + ' Còn <b>' + SC.n + '</b>/' + SC.total + ' từ trong tầm, mỗi ngày nạp <b>' + dailyNew() + '</b> từ.</p></div>'));
+  const chg = el('<button class="btn sm">' + ic("clock", 13) + " Đổi mục tiêu</button>");
+  chg.addEventListener("click", () => $("#btnSettings").click());
+  scopeNote.appendChild(chg);
+  v.appendChild(scopeNote);
+
+  v.appendChild(el('<div class="sect"><h3>Chủ đề</h3><span class="ln"></span><span class="mt"><b>' + V.packs.length + "</b> nhóm · <b>" + SC.n + "</b> từ trong tầm</span></div>"));
 
   const g = el('<div class="packs"></div>');
   V.packs.forEach(p => {
     const s = packStats(p);
     const c = el('<button class="pack"><h4>' + esc(p.nameVi) + '</h4><div class="muted" style="font-size:12.5px">' + esc(p.name) + '</div>' +
-      '<div class="bar"><i style="width:' + Math.round(s.learned / s.total * 100) + '%"></i></div>' +
-      '<div class="meta"><span>' + s.learned + "/" + s.total + " thuộc</span><span>" + s.seen + " đã gặp</span></div></button>");
+      '<div class="bar"><i style="width:' + Math.round(s.learned / Math.max(1, s.scope) * 100) + '%"></i></div>' +
+      '<div class="meta"><span>' + s.learned + "/" + s.scope + " thuộc</span><span>" +
+      (s.scope < s.total ? (s.total - s.scope) + " từ ngoài tầm" : s.seen + " đã gặp") + "</span></div></button>");
     c.addEventListener("click", () => vocabPack($("#view"), p.id));
     g.appendChild(c);
   });
@@ -1561,8 +1641,12 @@ function buildQueueX(packId) {
   if (packId === "book") pool = bw;
   else if (packId) pool = WORDS.filter(w => w.pack === packId);
   else pool = WORDS.concat(bw);
+  const win = bandWindow();
   const due = pool.filter(w => ST.srs[w.w] && ST.srs[w.w].due <= now);
-  const fresh = pool.filter(w => !ST.srs[w.w]).slice(0, packId ? 20 : newAllowance());
+  /* từ trong sổ tay là từ anh tự vấp nên luôn được học, không lọc theo band */
+  const fresh = pool.filter(w => !ST.srs[w.w] && (packId === "book" || !w.band || inBand(w, win)))
+    .sort((a, b) => (Number(a.band) || 0) - (Number(b.band) || 0))
+    .slice(0, packId ? 20 : newAllowance());
   const q = due.concat(fresh);
   for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); const t = q[i]; q[i] = q[j]; q[j] = t; }
   return q;
@@ -2234,14 +2318,17 @@ ROUTES.music = function (v, id) {
     host.innerHTML = "";
     const list = SG().filter(s => s.lv === lv);
     const done = list.filter(s => songDone(s.id)).length;
-    host.appendChild(el('<p class="muted" style="font-size:14px;margin:2px 0 16px;max-width:66ch">' + esc(LVSUB[lv]) +
-      ' <b style="color:var(--ink-2)">Đã nghe ' + done + "/" + list.length + ".</b></p>"));
+    const nfit = list.filter(s => lvlGap(s.band, ST.target || 7) === 0).length;
+    host.appendChild(el('<p class="muted" style="font-size:14px;margin:2px 0 16px;max-width:70ch">' + esc(LVSUB[lv]) +
+      ' <b style="color:var(--ink-2)">Đã nghe ' + done + "/" + list.length + "." + (nfit ? " " + nfit + " bài hợp mục tiêu band " + fmtBand(ST.target) + "." : "") + "</b></p>"));
     const rows = el('<div class="rows"></div>');
     list.forEach((s, i) => {
       const meta = [ACCFLAG(s.acc), s.y, s.sp ? s.sp + " tỷ lượt nghe Spotify" : (s.hot || "")].filter(Boolean).join(" · ");
-      const row = el('<button class="list-row"><span class="idx">' + String(i + 1).padStart(2, "0") +
+      const fit = lvlGap(s.band, ST.target || 7) === 0;
+      const row = el('<button class="list-row"' + (fit ? ' data-fit="1"' : "") + '><span class="idx">' + String(i + 1).padStart(2, "0") +
         '</span><span style="flex:1;min-width:0"><span class="t"></span><span class="d"></span></span>' +
-        '<span class="right"><span class="pill' + (songDone(s.id) ? " ok" : "") + '">' + (songDone(s.id) ? "đã nghe" : esc(s.band || "")) + "</span></span></button>");
+        '<span class="right">' + (fit && !songDone(s.id) ? '<span class="pill acc">hợp mục tiêu</span> ' : "") +
+        '<span class="pill' + (songDone(s.id) ? " ok" : "") + '">' + (songDone(s.id) ? "đã nghe" : esc(s.band || "")) + "</span></span></button>");
       $(".t", row).textContent = s.t + " — " + s.a;
       $(".d", row).textContent = meta;
       row.addEventListener("click", () => go("music", s.id));
@@ -2491,6 +2578,7 @@ function buildWritingPrompt(item, task, text) {
     "LOẠI BÀI: Writing Task " + task + (task === 1 ? " (Academic — mô tả số liệu, tối thiểu 150 từ, KHÔNG được nêu ý kiến cá nhân)" : " (essay, tối thiểu 250 từ)") + "\n\n" +
     "ĐỀ BÀI:\n" + (task === 1 ? item.instruction + "\nSố liệu: " + JSON.stringify(item.chart) : item.prompt) + "\n\n" +
     "MÔ TẢ BAND THAM CHIẾU:\n" + crit + "\n\n" +
+    "MỤC TIÊU CỦA THÍ SINH: band " + fmtBand(ST.target) + ". Ngoài chấm điểm, phần summary PHẢI nói rõ bài này còn cách band " + fmtBand(ST.target) + " bao xa và rào cản lớn nhất là tiêu chí nào.\n\n" +
     "BÀI LÀM CỦA THÍ SINH:\n\"\"\"\n" + text + "\n\"\"\"\n\n" +
     "Trả về DUY NHẤT một object JSON theo đúng schema sau, không kèm chữ nào khác:\n" +
     '{"bands":{"TR":6.5,"CC":6,"LR":6.5,"GRA":6},"overall":6.5,"summary":"2-3 câu tiếng Việt nói thẳng bài này đang ở đâu và rào cản lớn nhất để lên band tiếp theo","strengths":["2-3 điểm mạnh cụ thể, tiếng Việt, có trích dẫn từ bài"],"improvements":[{"issue":"tên lỗi ngắn gọn","why":"vì sao lỗi này kéo band xuống, tiếng Việt","fix":"cách sửa cụ thể, tiếng Việt"}],"corrections":[{"original":"câu nguyên văn LẤY TỪ BÀI","better":"câu đã sửa bằng tiếng Anh","note":"giải thích ngắn bằng tiếng Việt"}],"nextSteps":["2-3 việc cụ thể nên làm trước bài viết sau, tiếng Việt"]}\n' +
@@ -2795,6 +2883,7 @@ function cueSession(v, card) {
     const prompt = "Bạn là giám khảo IELTS Speaking. Dưới đây là bản gõ lại phần trả lời Part 2 của thí sinh (không có âm thanh, nên với tiêu chí Pronunciation hãy chấm dè dặt và nói rõ giới hạn đó trong nhận xét).\n\n" +
       "CUE CARD:\n" + card.cue + "\n" + card.bullets.map(b => "- " + b).join("\n") + "\n\n" +
       "MÔ TẢ BAND THAM CHIẾU:\n" + crit + "\n\n" +
+      "MỤC TIÊU CỦA THÍ SINH: band " + fmtBand(ST.target) + ". Phần summary PHẢI nói rõ còn cách band " + fmtBand(ST.target) + " bao xa và tiêu chí nào đang kéo lại.\n\n" +
       "PHẦN NÓI CỦA THÍ SINH:\n\"\"\"\n" + text + "\n\"\"\"\n\n" +
       "Trả về DUY NHẤT một object JSON:\n" +
       '{"bands":{"FC":6.5,"LR":6,"GRA":6,"PRON":6},"overall":6,"summary":"2-3 câu tiếng Việt","strengths":["..."],"improvements":[{"issue":"...","why":"...","fix":"..."}],"corrections":[{"original":"câu lấy nguyên văn từ phần nói","better":"câu tiếng Anh tự nhiên hơn","note":"giải thích tiếng Việt"}],"nextSteps":["..."]}\n' +
