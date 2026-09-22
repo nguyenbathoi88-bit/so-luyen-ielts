@@ -416,6 +416,39 @@ button.chip:hover{border-color:var(--accent);color:var(--accent)}
 .toast{animation:pop .18s cubic-bezier(.22,1,.36,1)}
 .kbd{font-family:var(--num);font-size:10.5px;border:1px solid var(--line-2);border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--ink-3);background:var(--surface-2)}
 .hint-row{display:flex;gap:10px;justify-content:center;margin-top:12px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-3)}
+/* ---- bỏ qua từ đã biết ---- */
+.btn.xs{padding:4px 9px;font-size:12.2px;gap:5px}
+.skipbtn{display:flex;margin:10px auto 0;color:var(--ink-3)}
+.skipbtn:hover{color:var(--ink);background:var(--surface-2)}
+.sweepbar{display:flex;gap:16px;align-items:center;flex-wrap:wrap;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:var(--r-sheet);padding:13px 16px;margin:16px 0 4px}
+.sweepbar > div{flex:1;min-width:250px}
+.sweepbar b{font-family:var(--serif);font-size:15px}
+.sweepbar p{margin:4px 0 0;font-size:13.2px;line-height:1.55;color:var(--ink-2)}
+.sweepbar .btn{flex:none}
+.sweep-yes{border-color:var(--ok);color:var(--ok);font-weight:600}
+.sweep-yes:hover{background:var(--ok-soft);border-color:var(--ok)}
+.knownbox{margin:16px 0 4px;border:1px dashed var(--line-2);border-radius:var(--r-sheet);padding:13px 16px}
+.kb-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.kb-head b{font-family:var(--serif);font-size:15px}
+.kb-head span{font-size:12.5px;color:var(--ink-3);flex:1;min-width:140px}
+.kb-head .btn{flex:none;align-self:center}
+.kb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.kchip{display:inline-flex;align-items:center;gap:5px;font-size:12.8px;padding:3px 9px;border-radius:99px;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2)}
+.kchip i{display:inline-flex;color:var(--ink-3)}
+.kchip:hover{border-color:var(--accent);color:var(--ink);background:var(--accent-soft)}
+.kchip:hover i{color:var(--accent)}
+.kb-more{font-size:12.5px;color:var(--ink-3);align-self:center;padding-left:4px}
+.vtable tr.dim td{opacity:.5}
+.vtable tr.dim:hover td{opacity:1}
+.vtable td.vact{white-space:nowrap;text-align:right}
+.toast.act{display:flex;align-items:center;gap:14px;border-radius:var(--r-sheet);padding:11px 12px 11px 16px;
+  max-width:min(92vw,460px);text-align:left;line-height:1.45}
+.toast.act span{flex:1;min-width:0}
+.toast.act button{flex:none;background:transparent;border:1px solid rgba(255,255,255,.35);color:var(--paper);
+  border-radius:var(--r-ui);padding:4px 11px;font-size:12.8px;font-weight:600}
+.toast.act button:hover{background:rgba(255,255,255,.14)}
 @media (prefers-reduced-motion: reduce){*{animation-duration:.01ms !important;transition-duration:.01ms !important}}
 @media (max-width:1040px){ .hero{grid-template-columns:1fr} .booklet{grid-template-columns:1fr} .split{grid-template-columns:1fr} .passage,.answers{max-height:none} }
 @media (max-width:600px){
@@ -788,6 +821,7 @@ const blank = () => ({
   target: 7,
   rate: 1,
   srs: {},          // word -> {ivl, ease, due, reps, lapses}
+  know: {},         // word -> at   (tự bấm "đã biết", loại khỏi mọi hàng đợi)
   seen: {},         // packId -> true when opened
   reading: {},      // id -> {best, attempts, last}
   listening: {},
@@ -853,8 +887,20 @@ function overallBand() {
 const allWords = () => V.packs.flatMap(p => p.words.map(w => Object.assign({ pack: p.id, packName: p.name }, w)));
 const WORDS = allWords();
 const wIndex = {}; WORDS.forEach(w => wIndex[w.w] = w);
-function dueCount() { const now = Date.now(); return Object.entries(ST.srs).filter(([k, v]) => v.due <= now).length; }
-function learnedCount() { return Object.values(ST.srs).filter(v => v.ivl >= 7).length; }
+/* ---------- từ đã biết (bỏ qua) ---------- */
+/* Cửa sổ band là công cụ thô: mục tiêu 7.0 vẫn lấy từ band 5.5 trở lên, trong đó
+   có những từ người học đã biết từ lâu. Bấm bỏ qua không chỉ đỡ mất thời gian —
+   nó trả lại hạn mức từ mới trong ngày cho những từ thật sự kéo band.
+   Thẻ SRS cũ được GIỮ NGUYÊN (chỉ lọc ra khỏi hàng đợi) để bấm nhầm còn hoàn lại được. */
+function isKnown(w) { return !!(ST.know && ST.know[w]); }
+function knowCount() { return Object.keys(ST.know || {}).length; }
+function setKnown(word, on) {
+  if (!ST.know) ST.know = {};
+  if (on) ST.know[word] = Date.now(); else delete ST.know[word];
+  save();
+}
+function dueCount() { const now = Date.now(); return Object.entries(ST.srs).filter(([k, v]) => v.due <= now && !isKnown(k)).length; }
+function learnedCount() { return Object.entries(ST.srs).filter(([k, v]) => v.ivl >= 7 && !isKnown(k)).length; }
 /* ---------- mục tiêu band điều khiển nội dung ---------- */
 /* Từ mới chỉ lấy trong cửa sổ quanh mục tiêu: dưới mục tiêu 1.5 band coi như đã biết,
    trên mục tiêu 0.5 band là quá sức — học vào cũng không giữ được. */
@@ -879,8 +925,10 @@ function inBand(w, win) {
 }
 function scopeCount() {
   const win = bandWindow();
-  const inw = WORDS.filter(w => inBand(w, win));
+  const all = WORDS.filter(w => inBand(w, win));
+  const inw = all.filter(w => !isKnown(w.w));       // từ đã bấm bỏ qua không còn là việc phải làm
   return { n: inw.length, total: WORDS.length, win: win,
+    known: all.length - inw.length, inWin: all.length,
     learned: inw.filter(w => ST.srs[w.w] && ST.srs[w.w].ivl >= 7).length };
 }
 /* Mục tiêu cao thì mỗi ngày nạp nhiều hơn — 8.0 cần gấp đôi vốn từ so với 5.0 */
@@ -926,7 +974,7 @@ function lvlGap(level, t) {
 function buildQueue(packId) {
   const now = Date.now();
   const win = bandWindow();
-  const pool = packId ? WORDS.filter(w => w.pack === packId) : WORDS;
+  const pool = (packId ? WORDS.filter(w => w.pack === packId) : WORDS).filter(w => !isKnown(w.w));
   const due = pool.filter(w => ST.srs[w.w] && ST.srs[w.w].due <= now);
   const fresh = pool.filter(w => !ST.srs[w.w] && inBand(w, win))
     .sort((a, b) => (Number(a.band) || 0) - (Number(b.band) || 0))
@@ -969,6 +1017,16 @@ function week() {
 function toast(msg) {
   const t = el('<div class="toast">' + esc(msg) + "</div>"); document.body.appendChild(t);
   setTimeout(() => t.remove(), 2200);
+}
+/* toast có nút — dùng cho thao tác một chạm cần đường lùi (bỏ qua từ, bỏ qua cả loạt) */
+function toastAct(msg, label, fn, ms) {
+  $$(".toast.act").forEach(x => x.remove());
+  const t = el('<div class="toast act"><span>' + esc(msg) + "</span></div>");
+  const b = el('<button type="button">' + esc(label) + "</button>");
+  b.addEventListener("click", () => { t.remove(); fn(); });
+  t.appendChild(b); document.body.appendChild(t);
+  setTimeout(() => t.remove(), ms || 5000);
+  return t;
 }
 function animateDials(root) {
   requestAnimationFrame(() => {
@@ -1302,12 +1360,15 @@ ROUTES.home = function (v) {
 /* ============ Từ vựng ============ */
 function packStats(p) {
   const win = bandWindow();
-  let learned = 0, seen = 0, scope = 0;
+  let learned = 0, seen = 0, scope = 0, known = 0;
   p.words.forEach(w => {
+    if (isKnown(w.w)) { known++; if (inBand(w, win)) scope++; return; }
     if (inBand(w, win)) scope++;
     const c = ST.srs[w.w]; if (c) { seen++; if (c.ivl >= 7) learned++; }
   });
-  return { learned, seen, total: p.words.length, scope: scope };
+  /* từ đã bỏ qua vẫn tính là xong: thanh tiến độ phải đầy lên khi anh bỏ qua, không đứng im */
+  return { learned: learned, done: learned + known, seen: seen, known: known,
+    total: p.words.length, scope: scope };
 }
 ROUTES.vocab = function (v, arg) {
   if (arg && arg.start) return vocabSession(v, null);
@@ -1317,11 +1378,13 @@ ROUTES.vocab = function (v, arg) {
   v.appendChild(el(head("Từ vựng academic", TOTW + " từ hay ra thi, chia " + V.packs.length + " chủ đề. Thẻ hiện lại đúng lúc anh sắp quên — lặp lại ngắt quãng tiết kiệm thời gian hơn học thuộc lòng nhiều lần.")));
 
   const SC = scopeCount();
-  const bar = el(statline([
+  const stats = [
     { k: "Thẻ đến hạn", v: due, c: due ? "var(--accent)" : "var(--ink-3)" },
     { k: "Đã thuộc", v: SC.learned, s: "/ " + SC.n + " trong tầm" },
     { k: "Từ mới còn lại hôm nay", v: newAllowance(), s: "/ " + dailyNew() }
-  ]));
+  ];
+  if (knowCount()) stats.push({ k: "Đã bỏ qua", v: knowCount(), c: "var(--ink-3)" });
+  const bar = el(statline(stats));
   const goBtn = el('<button class="btn primary">' + (due ? "Ôn " + due + " thẻ đến hạn" : newAllowance() > 0 ? "Học từ mới" : "Ôn lại thẻ đã học") + "</button>");
   goBtn.addEventListener("click", () => vocabSession($("#view"), null));
   $(".sl-act", bar).appendChild(goBtn);
@@ -1338,6 +1401,8 @@ ROUTES.vocab = function (v, arg) {
   chg.addEventListener("click", () => $("#btnSettings").click());
   scopeNote.appendChild(chg);
   v.appendChild(scopeNote);
+  v.appendChild(sweepBar(null));
+  v.appendChild(knownPanel());
 
   v.appendChild(el('<div class="sect"><h3>Nhóm từ</h3><span class="ln"></span><span class="mt"><b>' + V.packs.length + "</b> nhóm · <b>" + SC.n + "</b> từ trong tầm</span></div>"));
 
@@ -1349,9 +1414,9 @@ ROUTES.vocab = function (v, arg) {
     list.forEach(p => {
       const s = packStats(p);
       const c = el('<button class="pack"><h4>' + esc(p.nameVi) + '</h4><div class="muted" style="font-size:12.5px">' + esc(p.name) + '</div>' +
-        '<div class="bar"><i style="width:' + Math.round(s.learned / Math.max(1, s.scope) * 100) + '%"></i></div>' +
-        '<div class="meta"><span>' + s.learned + "/" + s.scope + " thuộc</span><span>" +
-        (s.scope < s.total ? (s.total - s.scope) + " từ ngoài tầm" : s.seen + " đã gặp") + "</span></div></button>");
+        '<div class="bar"><i style="width:' + Math.round(s.done / Math.max(1, s.scope) * 100) + '%"></i></div>' +
+        '<div class="meta"><span>' + s.done + "/" + s.scope + " xong</span><span>" +
+        (s.known ? s.known + " đã bỏ qua" : s.scope < s.total ? (s.total - s.scope) + " từ ngoài tầm" : s.seen + " đã gặp") + "</span></div></button>");
       c.addEventListener("click", () => vocabPack($("#view"), p.id));
       g.appendChild(c);
     });
@@ -1375,19 +1440,160 @@ function vocabPack(v, id) {
   const b1 = el('<button class="btn primary">Luyện thẻ chủ đề này</button>');
   b1.addEventListener("click", () => vocabSession($("#view"), id));
   bar.appendChild(b1); v.appendChild(bar);
+  v.appendChild(sweepBar(id));
 
   const wrap = el('<div class="card scroll-x" style="padding:6px 0"></div>');
-  const t = el('<table class="vtable"><thead><tr><th>Từ</th><th>Nghĩa</th><th>Ví dụ</th><th>Band</th><th>Trạng thái</th></tr></thead><tbody></tbody></table>');
+  const t = el('<table class="vtable"><thead><tr><th>Từ</th><th>Nghĩa</th><th>Ví dụ</th><th>Band</th><th>Trạng thái</th><th></th></tr></thead><tbody></tbody></table>');
   const tb = $("tbody", t);
   p.words.forEach(w => {
-    const c = ST.srs[w.w];
-    const stt = !c ? '<span class="pill">chưa học</span>' : c.ivl >= 7 ? '<span class="pill ok">thuộc</span>' : c.due <= Date.now() ? '<span class="pill warn">đến hạn</span>' : '<span class="pill acc">' + Math.ceil((c.due - Date.now()) / DAY) + "n nữa</span>";
-    tb.appendChild(el("<tr><td><b>" + esc(w.w) + '</b> <span class="muted">(' + esc(w.pos) + ')</span><br><span class="mono muted ipa-t" style="font-size:12.5px">' + esc(w.ipa) + "</span></td>" +
+    const row = el("<tr><td><b>" + esc(w.w) + '</b> <span class="muted">(' + esc(w.pos) + ')</span><br><span class="mono muted ipa-t" style="font-size:12.5px">' + esc(w.ipa) + "</span></td>" +
       "<td>" + esc(w.vi) + collHTML(w.coll, true) + (w.warn ? '<span class="tipdot" title="' + esc(w.warn) + '">' + ic("clock", 11) + "</span>" : "") + "</td>" +
       '<td style="font-family:var(--serif);font-style:italic;max-width:340px">' + esc(w.ex) + "</td>" +
-      '<td class="mono">' + fmtBand(w.band) + "</td><td>" + stt + "</td></tr>"));
+      '<td class="mono">' + fmtBand(w.band) + '</td><td class="stt"></td><td class="vact"></td></tr>');
+    paintRow(row, w);
+    tb.appendChild(row);
   });
   wrap.appendChild(t); v.appendChild(wrap);
+}
+
+/* Một hàng trong bảng từ: trạng thái + nút bỏ qua/học lại.
+   Vẽ lại tại chỗ thay vì dựng lại cả trang — bỏ qua 20 từ liền mà trang không nhảy. */
+function paintRow(row, w) {
+  const c = ST.srs[w.w], kn = isKnown(w.w);
+  $(".stt", row).innerHTML = kn ? '<span class="pill">đã bỏ qua</span>'
+    : !c ? '<span class="pill">chưa học</span>'
+    : c.ivl >= 7 ? '<span class="pill ok">thuộc</span>'
+    : c.due <= Date.now() ? '<span class="pill warn">đến hạn</span>'
+    : '<span class="pill acc">' + Math.ceil((c.due - Date.now()) / DAY) + "n nữa</span>";
+  row.classList.toggle("dim", kn);
+  const cell = $(".vact", row); cell.innerHTML = "";
+  const b = el('<button class="btn xs ghost">' + (kn ? ic("rewind", 12) + " Học lại" : ic("check", 12) + " Bỏ qua") + "</button>");
+  b.title = kn ? "Đưa từ này trở lại hàng đợi" : "Tôi đã biết từ này — đừng hiện lại nữa";
+  b.addEventListener("click", () => { setKnown(w.w, !kn); paintRow(row, w); refreshTags(); });
+  cell.appendChild(b);
+}
+
+/* Lọc nhanh: chỉ hiện mặt trước, hai nút to. Mục đích là quét 30 từ trong một phút
+   để hạn mức từ mới trong ngày rơi vào từ thật sự chưa biết. */
+function sweepBar(packId) {
+  const win = bandWindow();
+  const pool = (packId ? WORDS.filter(x => x.pack === packId) : WORDS)
+    .filter(x => !isKnown(x.w) && !ST.srs[x.w] && inBand(x, win));
+  const box = el('<div class="sweepbar"></div>');
+  box.appendChild(el('<div><b>Nhiều từ đã biết sẵn?</b><p>Quét một lượt, từ nào dễ thì bấm bỏ qua — hạn mức <b>' +
+    dailyNew() + '</b> từ mới mỗi ngày sẽ dồn cho những từ anh thật sự chưa biết. Còn <b>' + pool.length + '</b> từ chưa đụng tới' +
+    (packId ? " trong nhóm này" : "") + ".</p></div>"));
+  const b = el('<button class="btn sm">' + ic("search", 13) + " Lọc nhanh</button>");
+  b.disabled = !pool.length;
+  b.addEventListener("click", () => vocabSweep($("#view"), packId));
+  box.appendChild(b);
+  return box;
+}
+
+/* Bảng từ đã bỏ qua — đường lùi phải luôn nhìn thấy được, nếu không người dùng
+   sẽ không dám bấm bỏ qua lần nào. */
+function knownPanel() {
+  const n = knowCount();
+  const box = el('<div class="knownbox"></div>');
+  if (!n) { box.hidden = true; return box; }
+  const list = Object.keys(ST.know).sort((a, b) => (ST.know[b] || 0) - (ST.know[a] || 0));
+  const head = el('<div class="kb-head"><b>' + n + ' từ đã bỏ qua</b><span>không hiện lại trong buổi ôn nào nữa</span></div>');
+  const all = el('<button class="btn xs ghost">' + ic("rewind", 12) + " Học lại tất cả</button>");
+  let armed = 0;
+  all.addEventListener("click", () => {
+    if (!armed) { armed = 1; all.textContent = "Bấm lần nữa để xác nhận"; setTimeout(() => { armed = 0; all.innerHTML = ic("rewind", 12) + " Học lại tất cả"; }, 4000); return; }
+    const back = Object.assign({}, ST.know);
+    ST.know = {}; save(); refreshTags(); go("vocab");
+    toastAct("Đã đưa " + n + " từ trở lại hàng đợi", "Hoàn lại", () => { ST.know = back; save(); refreshTags(); go("vocab"); });
+  });
+  head.appendChild(all);
+  box.appendChild(head);
+  const chips = el('<div class="kb-chips"></div>');
+  list.slice(0, 60).forEach(k => {
+    const c = el('<button class="kchip" title="Bấm để học lại từ này">' + esc(k) + "<i>" + ic("x", 11) + "</i></button>");
+    c.addEventListener("click", () => {
+      setKnown(k, false); refreshTags(); c.remove();
+      const left = knowCount();
+      $("b", head).textContent = left + " từ đã bỏ qua";
+      if (!left) go("vocab");
+      toastAct('Đã đưa "' + k + '" trở lại hàng đợi', "Bỏ qua lại", () => { setKnown(k, true); refreshTags(); go("vocab"); });
+    });
+    chips.appendChild(c);
+  });
+  if (list.length > 60) chips.appendChild(el('<span class="kb-more">… và ' + (list.length - 60) + " từ nữa</span>"));
+  box.appendChild(chips);
+  return box;
+}
+
+/* ---------- lọc nhanh ---------- */
+function vocabSweep(v, packId) {
+  const win = bandWindow();
+  const pool = (packId ? WORDS.filter(x => x.pack === packId) : WORDS)
+    .filter(x => !isKnown(x.w) && !ST.srs[x.w] && inBand(x, win))
+    .sort((a, b) => (Number(a.band) || 0) - (Number(b.band) || 0));
+  v.innerHTML = "";
+  const back = el('<button class="btn ghost sm no-print" style="margin-bottom:12px">' + ic("left", 13) + " Thoát lọc nhanh</button>");
+  back.addEventListener("click", () => packId ? vocabPack($("#view"), packId) : go("vocab"));
+  v.appendChild(back);
+  if (!pool.length) {
+    v.appendChild(el('<div class="card empty"><h3 style="font-size:20px;color:var(--ink)">Không còn từ nào để lọc</h3><p>Mọi từ trong tầm band đều đã học hoặc đã bỏ qua.</p></div>'));
+    return;
+  }
+  v.appendChild(el(head("Lọc nhanh", "Chỉ hiện mặt chữ. Biết nghĩa rồi thì bấm <b>Đã biết</b> — từ đó bị loại khỏi mọi buổi ôn sau. Chưa chắc thì bấm <b>Giữ lại học</b>.")));
+  const wrap = el('<div class="flash"></div>');
+  const prog = el('<div class="row" style="justify-content:space-between;margin-bottom:12px"><span class="eyebrow" id="sprog"></span><span class="eyebrow" id="spack"></span></div>');
+  wrap.appendChild(prog);
+  const card = el('<div class="fcard sweep"></div>'); wrap.appendChild(card);
+  const actions = el('<div style="margin-top:14px"></div>'); wrap.appendChild(actions);
+  v.appendChild(wrap);
+
+  let i = 0, skipped = 0;
+  const touched = [];
+  function finish() {
+    card.innerHTML = '<div><div class="word" style="font-size:28px">Lọc xong</div><p class="muted" style="margin-top:10px">Đã bỏ qua <b>' + skipped +
+      "</b> từ. Hạn mức " + dailyNew() + " từ mới mỗi ngày giờ dồn cho những từ anh chưa biết.</p></div>";
+    actions.innerHTML = "";
+    const g = el('<div class="row" style="gap:8px"></div>');
+    const b1 = el('<button class="btn primary" style="flex:1">Học từ mới ngay</button>');
+    b1.addEventListener("click", () => vocabSession($("#view"), packId));
+    const b2 = el('<button class="btn">Về danh sách</button>');
+    b2.addEventListener("click", () => packId ? vocabPack($("#view"), packId) : go("vocab"));
+    g.appendChild(b1); g.appendChild(b2); actions.appendChild(g);
+    if (touched.length) {
+      const u = el('<button class="btn xs ghost" style="margin-top:12px">' + ic("rewind", 12) + " Hoàn lại " + touched.length + " từ vừa bỏ qua</button>");
+      u.addEventListener("click", () => { touched.forEach(k => setKnown(k, false)); refreshTags(); toast("Đã hoàn lại " + touched.length + " từ"); u.remove(); });
+      actions.appendChild(u);
+    }
+    refreshTags();
+  }
+  function render() {
+    if (i >= pool.length) return finish();
+    const w = pool[i];
+    $("#sprog", prog).textContent = "Từ " + (i + 1) + " / " + pool.length;
+    $("#spack", prog).textContent = w.packName + " · band " + fmtBand(w.band);
+    card.innerHTML = '<div><div class="word">' + esc(w.w) + '</div><div class="ipa">' + esc(w.ipa) + " · " + esc(w.pos) + "</div></div>";
+    actions.innerHTML = "";
+    const g = el('<div class="row" style="gap:8px"></div>');
+    const know = el('<button class="btn sweep-yes" style="flex:1">' + ic("check", 14) + " Đã biết</button>");
+    know.addEventListener("click", () => { setKnown(w.w, true); touched.push(w.w); skipped++; i++; render(); });
+    const keep = el('<button class="btn primary" style="flex:1">Giữ lại học</button>');
+    keep.addEventListener("click", () => { i++; render(); });
+    g.appendChild(know); g.appendChild(keep); actions.appendChild(g);
+    const say = el('<button class="btn xs ghost" style="margin-top:10px">' + ic("sound", 12) + " Nghe từ này</button>");
+    say.addEventListener("click", () => speak(w.w));
+    actions.appendChild(say);
+    actions.appendChild(el('<div class="hint-row"><span><span class="kbd">K</span> đã biết</span><span><span class="kbd">Space</span> giữ lại</span><span><span class="kbd">S</span> nghe</span></div>'));
+  }
+  function onKey(e) {
+    if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    if (i >= pool.length) return;
+    if (e.key === "k" || e.key === "K") { e.preventDefault(); const w = pool[i]; setKnown(w.w, true); touched.push(w.w); skipped++; i++; render(); return; }
+    if (e.code === "Space" || e.key === "Enter") { e.preventDefault(); i++; render(); return; }
+    if (e.key === "s" || e.key === "S") { e.preventDefault(); speak(pool[i].w, 0.85); }
+  }
+  document.addEventListener("keydown", onKey);
+  onLeave(() => document.removeEventListener("keydown", onKey));
+  render();
 }
 
 function vocabSession(v, packId) {
@@ -1413,7 +1619,9 @@ function vocabSession(v, packId) {
       else {
         card.innerHTML = '<div><div class="word" style="font-size:28px">Hoàn thành</div><p class="muted" style="margin-top:10px">Anh vừa ôn ' + done + " lượt thẻ. Chuỗi ngày học đã được ghi nhận.</p></div>";
         actions.innerHTML = ""; const b = el('<button class="btn primary" style="width:100%">Về danh sách chủ đề</button>');
-        b.addEventListener("click", () => go("vocab")); actions.appendChild(b); refreshTags(); return;
+        b.addEventListener("click", () => go("vocab")); actions.appendChild(b);
+        keyMode = "done"; keySkip = null; keyReveal = null; keyGrade = null;
+        refreshTags(); return;
       }
     }
     const w = queue[i];
@@ -1428,8 +1636,25 @@ function vocabSession(v, packId) {
     show.addEventListener("click", reveal);
     rowb.appendChild(show); rowb.appendChild(say);
     actions.appendChild(rowb);
-    actions.appendChild(el('<div class="hint-row"><span><span class="kbd">Space</span> hiện nghĩa</span><span><span class="kbd">S</span> nghe</span></div>'));
-    keyMode = "front"; keyReveal = reveal; keyGrade = null;
+    /* Nút bỏ qua nằm ở MẶT TRƯỚC: biết nghĩa rồi thì không việc gì phải lật thẻ.
+       Đặt tách khỏi hai nút chính để không bấm nhầm khi đang lướt nhanh. */
+    const skip = el('<button class="btn xs ghost skipbtn">' + ic("check", 12) + " Đã biết từ này, đừng hiện lại</button>");
+    skip.addEventListener("click", doSkip);
+    actions.appendChild(skip);
+    actions.appendChild(el('<div class="hint-row"><span><span class="kbd">Space</span> hiện nghĩa</span><span><span class="kbd">S</span> nghe</span><span><span class="kbd">K</span> đã biết</span></div>'));
+    keyMode = "front"; keyReveal = reveal; keyGrade = null; keySkip = doSkip;
+
+    function doSkip() {
+      setKnown(w.w, true);
+      /* rút khỏi cả hàng đợi lẫn danh sách "học lại cuối buổi" */
+      for (let k = queue.length - 1; k > i; k--) if (queue[k].w === w.w) queue.splice(k, 1);
+      again = again.filter(x => x.w !== w.w);
+      queue.splice(i, 1);
+      refreshTags(); render();
+      toastAct('Đã bỏ qua "' + w.w + '"', "Hoàn lại", () => {
+        setKnown(w.w, false); queue.splice(Math.min(i, queue.length), 0, w); refreshTags(); render();
+      });
+    }
 
     function reveal() {
       card.classList.remove("turn"); void card.offsetWidth; card.classList.add("turn");
@@ -1448,17 +1673,22 @@ function vocabSession(v, packId) {
         g.appendChild(b);
       });
       actions.appendChild(g);
-      actions.appendChild(el('<div class="hint-row"><span><span class="kbd">1</span> Lại</span><span><span class="kbd">2</span> Khó</span><span><span class="kbd">3</span> Được</span><span><span class="kbd">4</span> Dễ</span></div>'));
-      keyMode = "back";
+      const skip2 = el('<button class="btn xs ghost skipbtn">' + ic("check", 12) + " Quá dễ — bỏ hẳn khỏi danh sách ôn</button>");
+      skip2.addEventListener("click", doSkip);
+      actions.appendChild(skip2);
+      actions.appendChild(el('<div class="hint-row"><span><span class="kbd">1</span> Lại</span><span><span class="kbd">2</span> Khó</span><span><span class="kbd">3</span> Được</span><span><span class="kbd">4</span> Dễ</span><span><span class="kbd">K</span> bỏ hẳn</span></div>'));
+      keyMode = "back"; keySkip = doSkip;
       keyGrade = gv => { grade(w.w, gv); if (gv === 0) again.push(w); done++; i++; render(); };
     }
   }
 
-  let keyMode = "front", keyReveal = null, keyGrade = null;
+  let keyMode = "front", keyReveal = null, keyGrade = null, keySkip = null;
   function onKey(e) {
     if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    if (keyMode === "front" && (e.key === "k" || e.key === "K")) { e.preventDefault(); keySkip && keySkip(); return; }
     if (keyMode === "front" && (e.code === "Space" || e.key === "Enter")) { e.preventDefault(); keyReveal && keyReveal(); return; }
     if ((e.key === "s" || e.key === "S") && queue[i]) { e.preventDefault(); speak(queue[i].w, 0.85); return; }
+    if (keyMode === "back" && (e.key === "k" || e.key === "K")) { e.preventDefault(); keySkip && keySkip(); return; }
     if (keyMode === "back" && /^[1-4]$/.test(e.key)) { e.preventDefault(); keyGrade && keyGrade(parseInt(e.key, 10) - 1); }
   }
   document.addEventListener("keydown", onKey);
@@ -1858,6 +2088,7 @@ function buildQueueX(packId) {
   if (packId === "book") pool = bw;
   else if (packId) pool = WORDS.filter(w => w.pack === packId);
   else pool = WORDS.concat(bw);
+  pool = pool.filter(w => !isKnown(w.w));   // từ đã bấm "đã biết" không bao giờ vào hàng đợi nữa
   const win = bandWindow();
   const due = pool.filter(w => ST.srs[w.w] && ST.srs[w.w].due <= now);
   /* từ trong sổ tay là từ anh tự vấp nên luôn được học, không lọc theo band */
@@ -3315,6 +3546,12 @@ function mergeState(a, b) {
     const x = out.songs[k], y = bSong[k];
     out.songs[k] = !x ? y : { done: !!(x.done || y.done), at: Math.min(x.at || Infinity, y.at || Infinity) || Date.now() };
   }
+  /* từ đã bỏ qua: hợp hai máy, giữ mốc bấm sớm nhất.
+     Đánh đổi giống chỗ tô sáng — hoàn lại một từ ở máy A có thể sống lại từ máy B. */
+  out.know = Object.assign({}, a.know || {});
+  const bk = b.know || {};
+  for (const k in bk) out.know[k] = Math.min(out.know[k] || Infinity, bk[k] || Date.now()) || Date.now();
+
   const an = a.newToday || { d: "", n: 0 }, bn = b.newToday || { d: "", n: 0 };
   out.newToday = an.d === bn.d ? { d: an.d, n: Math.max(an.n || 0, bn.n || 0) } : (bn.d === dayKey() ? bn : an);
 
@@ -3475,7 +3712,8 @@ const GUIDE = [
       "Mỗi thẻ hiện một từ. Nghĩ ra nghĩa trong đầu rồi bấm Space để lật.",
       "Chấm thật lòng: bấm <b>Lại</b> nếu quên hẳn, <b>Khó</b> nếu nhớ chật vật, <b>Được</b> nếu nhớ ra, <b>Dễ</b> nếu bật ra ngay. Chấm rộng tay là tự hại mình — thẻ sẽ quay lại muộn hơn mức anh thật sự nhớ được.",
       "App tự tính ngày hiện lại từng thẻ. Đến hạn thì nó nổi lên, chưa đến hạn thì nó nằm im — đó là lý do mỗi ngày chỉ mất mươi phút.",
-      "Số từ mới mỗi ngày do band mục tiêu quyết định. Đừng cố nạp thêm; phần khó không phải học thuộc mà là giữ được."
+      "Số từ mới mỗi ngày do band mục tiêu quyết định. Đừng cố nạp thêm; phần khó không phải học thuộc mà là giữ được.",
+      "Gặp từ đã biết sẵn thì bấm <b>Đã biết</b> ngay ở mặt trước thẻ (phím <b>K</b>) — từ đó biến khỏi mọi buổi ôn sau, và suất từ mới của ngày hôm đó dồn sang từ khác. Muốn quét cả loạt thì bấm <b>Lọc nhanh</b> ở trang Từ vựng; bấm nhầm thì bảng <b>Đã bỏ qua</b> ngay dưới đó cho học lại."
     ],
     trap: "Học một mạch 200 thẻ trong một buổi rồi bỏ ba ngày — cách đó gần như không đọng lại gì. Mười lăm phút mỗi ngày ăn đứt ba tiếng một tuần." },
   { k: "reading", ic: "eye", t: "Reading", d: "Bài đọc học thuật kèm chỗ chứa đáp án",
