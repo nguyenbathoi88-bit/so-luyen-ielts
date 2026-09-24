@@ -2,7 +2,7 @@
    App là một file HTML duy nhất, nên chỉ cần giữ file đó cùng vài tài nguyên nhỏ.
    Chiến lược: mạng trước, hỏng thì lấy bản đã lưu. Nhờ vậy mở app luôn thấy bản mới nhất
    khi có mạng, mà mất mạng vẫn dùng được bản lần trước. */
-const CACHE = "soluyenielts-v4";
+const CACHE = "soluyenielts-v5";
 const CORE = ["/", "/index.html", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", e => {
