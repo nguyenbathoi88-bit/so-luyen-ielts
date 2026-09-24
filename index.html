@@ -1922,6 +1922,10 @@ function ansEq(key, given) {
 
 function buildQuestions(host, questions) {
   const answers = new Array(questions.length).fill(null);
+  /* Giữ tham chiếu tới ĐÚNG hộp của từng câu. Trước đây chấm xong tra lại bằng
+     host.children[i], nhưng host còn chứa cả các dòng .qhead chèn giữa các nhóm câu,
+     nên mọi câu sau dòng hướng dẫn đầu tiên đều nhận giải thích của câu khác. */
+  const boxes = new Array(questions.length).fill(null);
   questions.forEach((q, i) => {
     if (q.head) host.appendChild(el('<div class="qhead">' + esc(q.head) + "</div>"));
     const box = el('<div class="q"></div>');
@@ -1969,13 +1973,14 @@ function buildQuestions(host, questions) {
       inp.addEventListener("input", () => { answers[i] = inp.value; });
       box.appendChild(inp);
     }
+    boxes[i] = box;
     host.appendChild(box);
   });
 
   function check() {
     let correct = 0;
     questions.forEach((q, i) => {
-      const box = host.children[i]; if (!box) return;
+      const box = boxes[i]; if (!box) return;
       $$(".why", box).forEach(x => x.remove());
       let ok = false, shown = "";
       const a = answers[i];
@@ -1994,21 +1999,17 @@ function buildQuestions(host, questions) {
           if (bi === a && !ok) { b.style.background = "var(--bad-soft)"; b.style.borderColor = "var(--bad)"; b.style.color = "var(--bad)"; }
         });
       } else if (q.type === "mcq2") {
-      answers[i] = [];
-      const row = el('<div class="opts" style="flex-direction:column"></div>');
-      q.options.forEach((o, oi) => {
-        const b = el('<button class="opt mc multi" aria-pressed="false"><b class="mono" style="font-size:11px;color:var(--ink-3)">' + "ABCDE"[oi] + "</b>&nbsp; " + esc(o) + "</button>");
-        b.addEventListener("click", () => {
-          const arr = answers[i] || [];
-          const k = arr.indexOf(oi);
-          if (k >= 0) arr.splice(k, 1); else { if (arr.length >= 2) arr.shift(); arr.push(oi); }
-          answers[i] = arr;
-          $$(".opt", row).forEach((x, xi) => x.setAttribute("aria-pressed", String(arr.indexOf(xi) >= 0)));
+        /* Chọn 2 đáp án: đúng khi trùng đủ cả hai, không tính thứ tự bấm. */
+        const want = (Array.isArray(q.a) ? q.a : [q.a]).slice().sort();
+        const got = (Array.isArray(a) ? a : []).slice().sort();
+        ok = got.length === want.length && want.every((x, k) => x === got[k]);
+        shown = want.map(x => "ABCDE"[x] + ". " + q.options[x]).join("  ·  ");
+        $$(".opt", box).forEach((b, bi) => {
+          b.disabled = true;
+          if (want.indexOf(bi) >= 0) b.style.borderColor = "var(--ok)";
+          if (got.indexOf(bi) >= 0 && want.indexOf(bi) < 0) { b.style.background = "var(--bad-soft)"; b.style.borderColor = "var(--bad)"; b.style.color = "var(--bad)"; }
         });
-        row.appendChild(b);
-      });
-      box.appendChild(row);
-    } else if (q.type === "match") {
+      } else if (q.type === "match") {
         ok = a === q.a; shown = q.options[q.a];
         const s = $("select", box); if (s) s.disabled = true;
       } else {
